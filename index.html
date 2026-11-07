@@ -170,6 +170,11 @@ main{padding:14px 16px 32px;gap:20px}
 .opt-group{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:14px 0 8px}
 .opt-group:first-of-type{margin-top:2px}
 .line-qty span{min-width:16px;text-align:center;font-weight:700;font-size:13px}
+.price-old{display:flex;align-items:center;gap:6px;margin:0 0 3px;font-size:13px;color:var(--muted);font-weight:600}
+.price-old s{text-decoration:line-through;text-decoration-thickness:1.5px}
+.off-badge{background:var(--wine);color:var(--cream);font-size:10px;font-weight:800;letter-spacing:.03em;padding:2px 7px;border-radius:999px;white-space:nowrap;text-decoration:none}
+.pr s{color:var(--muted);font-weight:600;margin-right:6px}
+@media(max-width:639px){.price-old{font-size:11px;gap:4px}.off-badge{font-size:9px;padding:2px 5px}}
 </style>
 </head>
 <body>
@@ -220,8 +225,10 @@ const IMG_ALIAS = {};
 const MAYORISTA_PLACEHOLDERS = {"Vinos":{"emoji":"🍷"},"Vodka":{"emoji":"🍸"},"Whisky":{"emoji":"🥃"},"Licores":{"emoji":"🥂"},"Gin":{"emoji":"🍸"},"Aperitivos":{"emoji":"🍹"},"Ron":{"emoji":"🥃"},"Gaseosas":{"emoji":"🥤"},"Jugos":{"emoji":"🧃"},"Cervezas":{"emoji":"🍺"},"Espumantes":{"emoji":"🍾"}};
 const CATEGORIES = ["Combos","Vinos","Vodka","Cervezas","Whisky","Licores","Gin","Aperitivos","Ron","Sin Alcohol","Espumantes"];
 // ===== Precios por horario (hora de Argentina) =====
-// Los precios cargados en DATA son los de DÍA. Desde nightFrom hasta dayFrom rige la tarifa nocturna (+markup).
-const PRICING = {tz:"America/Argentina/Buenos_Aires", nightFrom:22, dayFrom:6, markup:0.20};
+// Los precios cargados en DATA son los precios CON descuento (los de antes de las 22 hs).
+// Antes de las 22 hs: se muestra el precio "lleno" tachado + el precio con descuento + cartel "20% OFF".
+// Desde las 22 hs hasta las 6 hs: sin cartel, el precio "lleno" pasa a ser el precio real.
+const PRICING = {tz:"America/Argentina/Buenos_Aires", nightFrom:22, dayFrom:6, discount:0.20};
 function isNight(){
   const h = parseInt(new Intl.DateTimeFormat("en-GB",{timeZone:PRICING.tz,hour:"numeric",hourCycle:"h23"}).format(new Date()),10);
   return h >= PRICING.nightFrom || h < PRICING.dayFrom;
@@ -230,11 +237,13 @@ let _night = null;
 function applyPricing(){
   const night = isNight();
   if (night === _night) return false;
-  const f = night ? 1 + PRICING.markup : 1;
   const walk = o => {
     if (Array.isArray(o)) return o.forEach(walk);
     if (o && typeof o === "object") {
-      if (typeof o.price === "number") { if (o.basePrice === undefined) o.basePrice = o.price; o.price = Math.round(o.basePrice * f / 100) * 100; }
+      if (typeof o.price === "number") {
+        if (o.basePrice === undefined) { o.basePrice = o.price; o.fullPrice = Math.round(o.price / (1 - PRICING.discount) / 50) * 50; }
+        o.price = night ? o.fullPrice : o.basePrice;
+      }
       Object.values(o).forEach(walk);
     }
   };
@@ -243,6 +252,8 @@ function applyPricing(){
   _night = night;
   return changed;
 }
+const offPct = Math.round(PRICING.discount * 100);
+const wasPrice = o => (o.fullPrice && o.price < o.fullPrice) ? `<s>${fmt(o.fullPrice)}</s>` : "";
 applyPricing();
 const CATALOGS = {
   todos: { products: [...DATA.products], categories: CATEGORIES, placeholders: {...MAYORISTA_PLACEHOLDERS, ...DATA.placeholders, "Sin Alcohol":{"emoji":"🥤"}} }
@@ -270,7 +281,7 @@ function renderGrid(){
     const extrasHtml = q>0 ? `<div class="extras-toggle">
       <button data-extoggle="${p.id}">Extras para este producto <span class="chev ${extrasOpen[p.id]?'open':''}">▾</span></button>
       ${extrasOpen[p.id]?EXTRAS_FOR(p).map(e=>{const k=p.id+":"+e.id;const eq=extras[k]||0;return `<div class="extra-item">
-        <div><p class="nm">${e.name}</p><p class="pr">${fmt(e.price)}</p></div>
+        <div><p class="nm">${e.name}</p><p class="pr">${wasPrice(e)}${fmt(e.price)}</p></div>
         ${eq>0?`<div class="qty-row"><button class="btn qty-btn outline" data-exsub="${k}">−</button><span class="qty-num">${eq}</span><button class="btn qty-btn" data-exadd="${k}">+</button></div>`
         :`<button class="extra-add" data-exadd="${k}">+ Agregar</button>`}
       </div>`;}).join(""):""}
@@ -280,7 +291,7 @@ function renderGrid(){
       <div class="card-body">
         <h3>${p.name}</h3><p class="detail">${p.detail}</p>${isBeer(p)&&q>=6?`<p class="in-cart">${beerLabel(p,q)}</p>`:""}${hasOpt&&q>0?`<p class="in-cart">${q} en tu pedido</p>`:""}
         <div class="price-row">
-          <div><p class="price">${fmt(p.price)}</p><p class="unit">${p.unit}</p></div>
+          <div>${p.fullPrice&&p.price<p.fullPrice?`<p class="price-old">${wasPrice(p)}<span class="off-badge">${offPct}% OFF</span></p>`:""}<p class="price">${fmt(p.price)}</p><p class="unit">${p.unit}</p></div>
           ${p.soldOut?`<button class="btn btn-add" disabled>Sin stock</button>`:hasOpt?`<button class="btn btn-add" data-opt="${p.id}">🛒 Agregar</button>`:q>0?`<div class="qty-row"><button class="btn qty-btn outline" data-sub="${p.id}">−</button><span class="qty-num">${q}</span><button class="btn qty-btn" data-add="${p.id}">+</button></div>`
           :`<button class="btn btn-add" data-add="${p.id}">🛒 Agregar</button>`}
         </div>
@@ -335,14 +346,14 @@ function renderCart(){
   </div><p class="ship-note">El envío se calcula según tu dirección.</p>`;
 }
 
-function renderNotices(){$("notices").innerHTML=`<p class="notice express"><strong>Armá tu pedido y elegí cuándo recibirlo</strong><span>(Zona Norte y CABA Express)</span></p><p class="notice">${isNight()?`🌙 <strong>Tarifa nocturna</strong> (de ${PRICING.nightFrom} a ${PRICING.dayFrom} hs). A partir de las ${PRICING.dayFrom} hs vuelven los precios de día.`:`☀️ <strong>Precios de día</strong> hasta las ${PRICING.nightFrom} hs. Desde las ${PRICING.nightFrom} hs rige la tarifa nocturna.`}</p>`;}
+function renderNotices(){$("notices").innerHTML=`<p class="notice express"><strong>Armá tu pedido y elegí cuándo recibirlo</strong><span>(Zona Norte y CABA Express)</span></p>${isNight()?"":`<p class="notice"><strong style="color:var(--wine);font-size:15px">🚨 ${offPct}% OFF EN TODA LA TIENDA, comprando antes de las ${PRICING.nightFrom} ⏳</strong></p>`}`;}
 function renderFloat(){const u=lines().reduce((s,l)=>s+l.qty,0);$("floatCount").textContent=u;$("floatCart").classList.toggle("show",u>0&&!asideVisible);}
 let asideVisible=false;
 if("IntersectionObserver" in window){new IntersectionObserver(es=>{asideVisible=es[0].isIntersecting;renderFloat();},{threshold:0.15}).observe($("cartAside"));}
 $("floatCart").onclick=()=>$("cartAside").scrollIntoView({behavior:"smooth",block:"start"});
 function renderAll(){renderFilters();renderNotices();renderGrid();renderCart();renderFloat();}
 $("sendBtn").onclick=()=>{
-  if(applyPricing()){renderAll();toast("Cambió la tarifa: revisá el total actualizado y volvé a enviar.");return;}
+  if(applyPricing()){renderAll();toast("Cambió el horario y los precios: revisá el total actualizado y volvé a enviar.");return;}
   const ls=lines();
   if(ls.length===0){toast("Tu pedido está vacío. Agregá algunas bebidas primero.");return;}
   const nombre=$("nombre").value.trim(),tel=$("telefono").value.trim(),dir=$("direccion").value.trim();
@@ -352,12 +363,12 @@ $("sendBtn").onclick=()=>{
   const detalle=ls.map(l=>(isBeer(l.p)&&l.qty>=6)?`• ${lname(l)} — ${fmt(l.p.price*l.qty)}`:`• ${l.qty} x ${lname(l)} (${l.p.unit}) — ${fmt(l.p.price*l.qty)}`).join("\n");
   const exLines=Object.entries(extras).map(([k,q])=>{const[pid,eid]=k.split(":");return{p:CATALOGS[tipo].products.find(x=>x.id===pid),e:EXTRAS_FOR(CATALOGS[tipo].products.find(x=>x.id===pid)).find(x=>x.id===eid),q};}).filter(x=>x.p&&x.e&&x.q>0);
   const exDetalle=exLines.length?["*Extras por producto:*",...exLines.map(x=>`• ${x.p.name}: ${x.q} x ${x.e.name} — ${fmt(x.e.price*x.q)}`)].join("\n"):null;
-    const msg=[`*SOLICITUD DE PEDIDO — ${DATA.nombre}*`,`Fecha: ${fecha}`,`Tarifa: ${isNight()?"nocturna":"de día"}`,"","*Productos:*",detalle,exDetalle,et>0?`Productos: ${fmt(sub)}`:null,et>0?`Extras: ${fmt(et)}`:null,`*SUBTOTAL: ${fmt(sub+et)}*`,"*ENVÍO:* Precio a confirmar según zona y horario","","*Datos del cliente:*",`Nombre: ${nombre}`,`Teléfono: ${tel}`,`Dirección: ${dir}`,$("localidad").value?`Localidad: ${$("localidad").value}`:null,`Forma de pago: ${$("pago").value}`,$("notas").value?`Notas: ${$("notas").value}`:null,"","──────────","_Pedido sujeto a confirmación de disponibilidad, costo de envío y total final. El envío de este mensaje no implica que el pedido esté aceptado._"].filter(Boolean).join("\n");
+    const msg=[`*SOLICITUD DE PEDIDO — ${DATA.nombre}*`,`Fecha: ${fecha}`,isNight()?null:`Promo: ${offPct}% OFF (compra antes de las ${PRICING.nightFrom} hs)`,"","*Productos:*",detalle,exDetalle,et>0?`Productos: ${fmt(sub)}`:null,et>0?`Extras: ${fmt(et)}`:null,`*SUBTOTAL: ${fmt(sub+et)}*`,"*ENVÍO:* Precio a confirmar según zona y horario","","*Datos del cliente:*",`Nombre: ${nombre}`,`Teléfono: ${tel}`,`Dirección: ${dir}`,$("localidad").value?`Localidad: ${$("localidad").value}`:null,`Forma de pago: ${$("pago").value}`,$("notas").value?`Notas: ${$("notas").value}`:null,"","──────────","_Pedido sujeto a confirmación de disponibilidad, costo de envío y total final. El envío de este mensaje no implica que el pedido esté aceptado._"].filter(Boolean).join("\n");
   window.open(`https://wa.me/${DATA.whatsapp}?text=${encodeURIComponent(msg)}`,"_blank","noopener,noreferrer");
   toast("Abrimos WhatsApp con tu pedido listo para enviar.");
 };
 renderAll();
-setInterval(()=>{if(applyPricing()){renderAll();if(Object.keys(cart).length)toast(isNight()?"Son las "+PRICING.nightFrom+" hs: ahora rige la tarifa nocturna.":"Volvieron los precios de día.");}},20000);
+setInterval(()=>{if(applyPricing()){renderAll();if(Object.keys(cart).length)toast(isNight()?"Son las "+PRICING.nightFrom+" hs: terminó el "+offPct+"% OFF y se actualizaron los precios.":"Volvió el "+offPct+"% OFF.");}},20000);
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&applyPricing())renderAll();});
 </script>
 <script>
